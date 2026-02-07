@@ -1,4 +1,5 @@
 ##step 1 get data
+import re
 import requests
 import pandas as pd
 from notion_client import Client
@@ -10,11 +11,13 @@ load_dotenv()
 
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 PAGE_ID = os.getenv("PAGE_ID")
+
 HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
     "Notion-Version": "2022-06-28",
     "Content-Type": "application/json"
 }
+
 
 # 用於遞歸獲取所有區塊及其子區塊
 def get_all_blocks(block_id):
@@ -22,13 +25,13 @@ def get_all_blocks(block_id):
     blocks = []
     has_more = True
     start_cursor = None
-
+    
     while has_more:
         if start_cursor:
             response = requests.get(url, headers=HEADERS, params={"start_cursor": start_cursor})
         else:
             response = requests.get(url, headers=HEADERS)
-
+        
         data = response.json()
         results = data.get('results', [])
         for block in results:
@@ -37,17 +40,19 @@ def get_all_blocks(block_id):
             if block.get('has_children', False):
                 child_blocks = get_all_blocks(block['id'])
                 blocks.extend(child_blocks)
-
         has_more = data.get('has_more', False)
         start_cursor = data.get('next_cursor')
-
+    
     return blocks
+
 
 def get_notion_page_content(page_id):
     blocks = get_all_blocks(page_id)
     return blocks
 
+
 page_content = get_notion_page_content(PAGE_ID)
+
 
 ## Step 2: 將區塊轉換為 DataFrame
 def blocks_to_dataframe(blocks):
@@ -63,9 +68,11 @@ def blocks_to_dataframe(blocks):
                     content += item['text']['content']
                 elif item['type'] == 'equation':
                     content += f"$$ {item['equation']['expression']} $$"
+        
         # 處理其他類型的區塊，例如 code 區塊
         elif block_type == 'code':
             content += block['code']['text'][0]['text']['content']
+        
         # 處理引言（quote）區塊
         elif block_type == 'quote':
             for item in block['quote']['rich_text']:
@@ -73,45 +80,78 @@ def blocks_to_dataframe(blocks):
                     content += item['text']['content']
                 elif item['type'] == 'equation':
                     content += f"$$ {item['equation']['expression']} $$"
+        
         # 其他可能的區塊類型可以在這裡添加
-
         data.append({'id': block['id'], 'type': block_type, 'content': content})
     
     return pd.DataFrame(data)
 
+
 df = blocks_to_dataframe(page_content)
+
 
 ## Step 3: 處理內容，提取公式並格式化
 def format_content_for_notion(block):
     # 如果 block 是字串，處理其中的公式
     if isinstance(block, str):
-        parts = block.split("$$")
+        # 使用正則表達式匹配 $$...$$ 塊公式和 $...$ 行內公式
+        # pattern: (\$\$)(.+?)(\$\$) 匹配塊公式
+        pattern = r'(\$\$)(.+?)(\$\$)|(\$)([^$].*?[^$])(\$)'
         formatted_parts = []
-
-        for i, part in enumerate(parts):
-            if i % 2 == 1:  # 奇數索引部分是公式
-                formatted_parts.append({
-                    "type": "equation",
-                    "equation": {"expression": part}
-                })
-            else:
-                if part:
+        last_end = 0
+        
+        for match in re.finditer(pattern, block):
+            start = match.start()
+            end = match.end()
+            
+            # 添加匹配前的文本
+            if start > last_end:
+                text_content = block[last_end:start]
+                if text_content:
                     formatted_parts.append({
                         "type": "text",
-                        "text": {"content": part}
+                        "text": {"content": text_content}
                     })
+            
+            # 判斷是塊公式還是行內公式
+            if match.group(1):  # $$...$$ 塊公式
+                expression = match.group(2).strip()
+                formatted_parts.append({
+                    "type": "equation",
+                    "equation": {"expression": expression}
+                })
+            else:  # $...$ 行內公式
+                expression = match.group(5).strip()
+                # 行內公式：創建 Notion inline equation
+                formatted_parts.append({
+                    "type": "equation",
+                    "equation": {"expression": expression}
+                })
+            
+            last_end = end
+        
+        # 添加剩餘文本
+        if last_end < len(block):
+            remaining = block[last_end:]
+            if remaining:
+                formatted_parts.append({
+                    "type": "text",
+                    "text": {"content": remaining}
+                })
+        
         return formatted_parts
     else:
         # 如果 block 是字典，直接返回
         return block
 
+
 def combine_text_and_equations(df):
     combined_blocks = []
-
+    
     for _, row in df.iterrows():
         content = row['content']
         notion_block_content = format_content_for_notion(content)
-
+        
         # 處理 divider 類型（不需要附帶任何內容）
         if row['type'] == "divider":
             combined_blocks.append({
@@ -139,13 +179,14 @@ def combine_text_and_equations(df):
         
         # 處理一般段落類型，保證不為空且有正確結構
         elif row['type'] == "paragraph":
-            if notion_block_content:  # 檢查 rich_text 不為空
+            if notion_block_content:
                 combined_blocks.append({
                     'type': 'paragraph',
                     'paragraph': {
                         'rich_text': notion_block_content
                     }
                 })
+        
         # 處理其他類型的區塊（例如 code）
         elif row['type'] == "code":
             combined_blocks.append({
@@ -155,6 +196,7 @@ def combine_text_and_equations(df):
                     'language': 'python'  # 根據實際情況設置語言
                 }
             })
+        
         # 其他區塊類型可以在這裡添加
         elif row['type'] == "bulleted_list_item":
             combined_blocks.append({
@@ -163,10 +205,12 @@ def combine_text_and_equations(df):
                     'rich_text': notion_block_content
                 }
             })
-
+    
     return combined_blocks
 
+
 combined_data = combine_text_and_equations(df)
+
 
 ##step 4 upload to notion
 def upload_to_notion(page_id, combined_blocks):
@@ -178,4 +222,21 @@ def upload_to_notion(page_id, combined_blocks):
     response = requests.patch(url, json=payload, headers=HEADERS)
     return response.json()
 
-upload_to_notion(PAGE_ID, combined_data)
+
+# Delete old blocks first, then upload new ones
+def delete_all_blocks(block_ids):
+    for block_id in block_ids:
+        url = f"https://api.notion.com/v1/blocks/{block_id}"
+        requests.delete(url, headers=HEADERS)
+
+# Collect old block IDs
+old_block_ids = [block['id'] for block in page_content]
+
+# Delete old blocks
+print(f"Deleting {len(old_block_ids)} old blocks...")
+delete_all_blocks(old_block_ids)
+
+# Upload new blocks
+print(f"Uploading {len(combined_data)} new blocks...")
+result = upload_to_notion(PAGE_ID, combined_data)
+print("Conversion complete!")
