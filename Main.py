@@ -2,9 +2,14 @@
 import requests
 import pandas as pd
 from notion_client import Client
+import os
+from dotenv import load_dotenv
 
-NOTION_API_KEY = "your api key"
-PAGE_ID = "your page id"
+# Load environment variables from .env file
+load_dotenv()
+
+NOTION_API_KEY = os.getenv("NOTION_API_KEY")
+PAGE_ID = os.getenv("PAGE_ID")
 HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
     "Notion-Version": "2022-06-28",
