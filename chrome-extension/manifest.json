@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Notion Equation Converter",
+  "version": "1.0.0",
+  "description": "Convert LaTeX-style equations ($...$ and $$...$$) into native Notion equation blocks using the Notion API",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://www.notion.so/*",
+    "https://notion.so/*",
+    "https://api.notion.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.ico",
+      "32": "icons/icon32.ico",
+      "48": "icons/icon48.ico",
+      "128": "icons/icon128.ico"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "convert-equations": {
+      "suggested_key": {
+        "default": "Alt+Shift+E"
+      },
+      "description": "Convert all LaTeX equations on current Notion page"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.ico",
+    "32": "icons/icon32.ico",
+    "48": "icons/icon48.ico",
+    "128": "icons/icon128.ico"
+  }
+}
