@@ -79,7 +79,7 @@ python Main.py
 
 ## License
 
-[Your License Here]
+MIT License
 
 ## Contributing
 
